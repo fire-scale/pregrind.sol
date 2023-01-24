@@ -10,6 +10,7 @@ use {
         error::Error,
     },
     mongodb::{Client, Collection, options::{ClientOptions, ResolverConfig, FindOneAndUpdateOptions}, bson::doc},
+    tokio::runtime::Runtime,
 };
 
 #[derive(serde::Deserialize)]
@@ -19,48 +20,18 @@ struct Document {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // DB
-
-    let client_uri = "mongodb://localhost:27017";
-    let options = ClientOptions::parse_with_resolver_config(
-        &client_uri, ResolverConfig::cloudflare())
-        .await?;
-    let client = Client::with_options(options)?;
-    // Print the databases in our MongoDB cluster:
-    let collection: Collection<Document> = client.database("solana").collection("keygen");
-    let options = FindOneAndUpdateOptions::builder()
-        .upsert(Some(true))
-        .build();
-    collection.find_one_and_update(doc! { "_id": "testing2" }, doc! { "$set": { "k": "another21" } }, Some(options)).await?;
-
-    // GRIND
-
     let num_threads: usize = num_cpus::get();
     println!("num threads: {}", num_threads);
     let attempts = Arc::new(AtomicU64::new(1));
     let start = Instant::now();
     let done = Arc::new(AtomicBool::new(false));
-
     let thread_handles: Vec<_> = (0..num_threads)
         .map(|_| {
             let done = done.clone();
             let attempts = attempts.clone();
-
-            thread::spawn(move || loop {
-                if done.load(Ordering::Relaxed) {
-                    break;
-                }
-                let attempts = attempts.fetch_add(1, Ordering::Relaxed);
-                let (keypair, _) = (Keypair::new(), "".to_string());
-                let pubkey = bs58::encode(keypair.pubkey()).into_string();
-                if attempts % 1_000_000 == 0 {
-                    println!(
-                        "Searched {} keypairs in {}s.",
-                        attempts,
-                        start.elapsed().as_secs(),
-                    );
-                    println!("{}: {}", pubkey, &keypair.to_base58_string());
-                }
+            thread::spawn(move || {
+                let rt = Runtime::new().unwrap();
+                let _ = rt.block_on(upload(done, attempts, start));
             })
         })
         .collect();
@@ -69,4 +40,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
         thread_handle.join().unwrap();
     }
     Ok(())
+}
+
+async fn upload(done: Arc<AtomicBool>, attempts: Arc<AtomicU64>, start: Instant) -> Result<(), Box<dyn Error>> {
+    let client_uri = "mongodb://localhost:27017";
+    let options = ClientOptions::parse_with_resolver_config(
+        &client_uri, ResolverConfig::cloudflare())
+        .await?;
+    let client = Client::with_options(options)?;
+    let options = FindOneAndUpdateOptions::builder()
+        .upsert(Some(true))
+        .build();
+    loop {
+        if done.load(Ordering::Relaxed) {
+            break;
+        }
+        let collection: Collection<Document> = client.database("solana").collection("keygen");
+        let attempts = attempts.fetch_add(1, Ordering::Relaxed);
+        let (keypair, _) = (Keypair::new(), "".to_string());
+        let pubkey = bs58::encode(keypair.pubkey()).into_string();
+        let privkey = keypair.to_base58_string();
+        collection.find_one_and_update(doc! { "_id": pubkey }, doc! { "$set": { "k": privkey } }, Some(options.clone())).await?;
+        if attempts % 1_000_000 == 0 {
+            println!(
+                "Searched {} keypairs in {}s.",
+                attempts,
+                start.elapsed().as_secs(),
+            );
+        }
+    }
+    return Ok(())
 }
