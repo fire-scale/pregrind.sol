@@ -1,10 +1,7 @@
 const web3 = require('@solana/web3.js');
 const bs58 = require('bs58');
 
-// 4amLeuKGKMn1jQtrX5LvAdxCF3dASiWZpn2msqJbzbm9
-const key = bs58.decode("2796zULToaxixe1RvP1vNLJStnkRWPAPRqv87yrFwRgbTSRi2dM4JVKRZwhXgCCuKUKWForLt3TUmEGPMvZwaJ6b");
-const pair = web3.Keypair.fromSecretKey(key);
-console.log(`public is ${pair.publicKey.toBase58()}`);
+// TODO: create a descending index
 return;
 
 let attempts = 0;
